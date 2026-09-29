@@ -89,9 +89,34 @@ class CurveBook:
             history = list(self._by_product.get(product_code, ()))
         return sorted(history, key=lambda item: item.generation)
 
+    def describe_history(self, product_code: str) -> list[dict]:
+        """返回某制品全部代际曲线，并标出当前生效（最新）的一条。
+
+        老曲线记录仍保留用于追溯，靠 ``generation`` 与 ``is_latest`` 与现用
+        曲线区分，避免改版后老时长被误当成现行口径。
+        """
+
+        history = self.history(product_code)
+        latest_generation = history[-1].generation if history else None
+        return [
+            {
+                **curve.as_dict(),
+                "is_latest": curve.generation == latest_generation,
+                "reference_thickness_mm": REFERENCE_THICKNESS_MM,
+            }
+            for curve in history
+        ]
+
     def snapshot(self) -> dict:
         with self._lock:
             return {
                 product_code: [curve.as_dict() for curve in history]
                 for product_code, history in sorted(self._by_product.items())
             }
+
+    def describe(self) -> dict:
+        """带最新代际标记的曲线台账快照，供控制台与审计展示。"""
+
+        with self._lock:
+            codes = sorted(self._by_product)
+        return {product_code: self.describe_history(product_code) for product_code in codes}

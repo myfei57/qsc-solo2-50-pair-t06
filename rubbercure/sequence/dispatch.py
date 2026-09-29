@@ -47,10 +47,10 @@ class DispatchSequence:
 
         self.recorder.clear()
         press = self.press
-        timer = press.timer.snapshot()
-        mold_id = str(timer.get("mold_id") or press.press_id)
-        product_code = str(timer.get("product_code") or "")
-        generation = int(timer.get("curve_generation") or 0)
+        last_cure = press.last_cure
+        mold_id = str(last_cure.get("mold_id") or press.press_id)
+        product_code = str(last_cure.get("product_code") or "")
+        generation = int(last_cure.get("curve_generation") or 0)
 
         report = self.scheduler.record_report(
             press.press_id,
@@ -58,6 +58,10 @@ class DispatchSequence:
             product_code,
             self.clock.now(),
             generation,
+            thickness_mm=float(last_cure.get("thickness_mm") or 0.0),
+            planned_s=float(last_cure.get("planned_s") or 0.0),
+            elapsed_s=float(last_cure.get("elapsed_s") or 0.0),
+            verdict=str(last_cure.get("verdict") or ""),
         )
         self.recorder.note(
             "completion_report",
@@ -65,6 +69,7 @@ class DispatchSequence:
             press_id=press.press_id,
             mold_id=mold_id,
             sequence=report.sequence,
+            verdict=report.verdict,
         )
 
         ordered = order_completions(

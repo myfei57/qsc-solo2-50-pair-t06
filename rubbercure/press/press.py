@@ -62,6 +62,7 @@ class CuringPress:
         self._mold_id: str | None = None
         self._cycles = 0
         self._last_step: dict = {}
+        self._last_cure: dict = {}
         self._lock = threading.RLock()
 
     @property
@@ -125,6 +126,12 @@ class CuringPress:
             }
             return self._last_step
 
+    def record_last_cure(self, result: dict) -> None:
+        """保存刚结束一模的硫化结果（含曲线代际与欠硫／过硫判定）。"""
+
+        with self._lock:
+            self._last_cure = dict(result)
+
     def finalize_cycle(self) -> dict:
         """一个模次结束：把相位推进到 DONE 并清在机模具。"""
 
@@ -135,6 +142,13 @@ class CuringPress:
             Event.of("press", "press", "cycle_done", subject=mold_id or self.press_id, press_id=self.press_id)
         )
         return {"press_id": self.press_id, "mold_id": mold_id, "phase": self._state.phase.value}
+
+    @property
+    def last_cure(self) -> dict:
+        """上一模的完成判定（取件复位后仍保留，供完成上报与追溯）。"""
+
+        with self._lock:
+            return dict(self._last_cure)
 
     def idle(self) -> dict:
         """回到待机，允许装载下一模。"""

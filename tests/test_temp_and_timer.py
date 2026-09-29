@@ -96,6 +96,49 @@ def test_validate_progress_verdicts(platform):
     assert validate_progress(900.0, 600.0, limits)["verdict"] == "over"
 
 
+def test_timer_locks_thickness_and_keeps_verdict_until_reset(platform):
+    unit = platform.press("press-01")
+    unit.timer.begin("m-v1", "RB-215", 600.0, 2, thickness_mm=12.0)
+    assert unit.timer.thickness_mm == 12.0
+    assert unit.timer.product_code == "RB-215"
+    assert unit.timer.snapshot()["verdict"] is None
+    unit.timer.accumulate(300.0)
+    complete_cure(unit.timer, platform.latch, platform.bus)
+    assert unit.timer.verdict["verdict"] == "short"
+    assert unit.timer.snapshot()["verdict"]["verdict_label"] == "欠硫"
+    unit.timer.reset("m-v1")
+    assert unit.timer.verdict is None
+    assert unit.timer.thickness_mm == 0.0
+    assert unit.timer.product_code == ""
+
+
+def test_timer_persists_and_restores_basis_and_verdict(platform):
+    unit = platform.press("press-02")
+    unit.timer.begin("m-v2", "RB-215", 600.0, 2, thickness_mm=8.0)
+    unit.timer.accumulate(900.0)
+    complete_cure(unit.timer, platform.latch, platform.bus)
+    unit.timer.persist_state()
+
+    reloaded = type(unit.timer)(platform.bus, unit.store, platform.config.timer)
+    assert reloaded.restore() is True
+    assert reloaded.product_code == "RB-215"
+    assert reloaded.generation == 2
+    assert reloaded.thickness_mm == 8.0
+    assert reloaded.verdict["verdict"] == "over"
+
+
+def test_complete_cure_reports_thickness_generation_and_label(platform):
+    unit = platform.press("press-03")
+    unit.timer.begin("m-v3", "RB-310", 400.0, 5, thickness_mm=3.0)
+    unit.timer.accumulate(400.0)
+    result = complete_cure(unit.timer, platform.latch, platform.bus)
+    assert result["thickness_mm"] == 3.0
+    assert result["curve_generation"] == 5
+    assert result["verdict"] == "ok"
+    assert result["verdict_label"] == "合格"
+    assert result["within_window"] is True
+
+
 def test_latch_release_all_reports_count():
     latch = CureLatch()
     latch.set("a", 1.0)

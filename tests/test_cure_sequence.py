@@ -14,6 +14,48 @@ from rubbercure.temp.read import MoldTempReading
 from rubbercure.timer.start import start_cure
 
 
+def test_cure_sequence_plans_time_from_thickness_and_latest_curve(platform):
+    thin = platform.run_cure("m-thin", thickness_mm=3.0, press_id="press-01")
+    thick = platform.run_cure("m-thick", thickness_mm=12.0, press_id="press-02")
+    assert thin["timer"]["thickness_mm"] == 3.0
+    assert thick["timer"]["thickness_mm"] == 12.0
+    assert thick["timer"]["planned_s"] > thin["timer"]["planned_s"]
+
+    platform.curves.register("RB-215", 900.0, platform.clock.now())
+    revised = platform.run_cure("m-rev", thickness_mm=6.0, press_id="press-03")
+    assert revised["timer"]["planned_s"] == 900.0
+    assert revised["timer"]["curve_generation"] == 2
+    assert thin["timer"]["curve_generation"] == 1
+
+
+def test_open_sequence_reports_short_verdict_and_allows_next_cure(platform):
+    cure = platform.run_cure("m-cycle", thickness_mm=6.0, press_id="press-01")
+    planned = cure["timer"]["planned_s"]
+    platform.press("press-01").timer.accumulate(planned * 0.5)
+    opened = platform.run_open("press-01")
+    assert opened["cure"]["verdict"] == "short"
+    assert opened["cure"]["verdict_label"] == "欠硫"
+    assert opened["cure"]["curve_generation"] == cure["timer"]["curve_generation"]
+    assert opened["cure"]["thickness_mm"] == 6.0
+    # 计时复位后同一台机能接下一模
+    again = platform.run_cure("m-cycle-2", thickness_mm=6.0, press_id="press-01")
+    assert again["timer"]["phase"] == "curing"
+
+
+def test_dispatch_report_carries_cure_basis_and_verdict(platform):
+    cure = platform.run_cure("m-rep", thickness_mm=6.0, press_id="press-01")
+    planned = cure["timer"]["planned_s"]
+    platform.press("press-01").timer.accumulate(planned + 1)
+    platform.run_open("press-01")
+    platform.run_dispatch("press-01")
+    report = platform.scheduler.recent_reports()[-1]
+    assert report.mold_id == "m-rep"
+    assert report.thickness_mm == 6.0
+    assert report.planned_s == planned
+    assert report.verdict == "ok"
+    assert report.curve_generation == 1
+
+
 def test_cure_sequence_runs_steps_in_order(platform):
     report = platform.run_cure("mold-A", cavity_count=4)
     assert report["steps"] == [

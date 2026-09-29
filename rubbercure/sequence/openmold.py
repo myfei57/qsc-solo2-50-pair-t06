@@ -35,6 +35,7 @@ class OpenSequence:
     bus: EventBus
     latch: CureLatch
     press: CuringPress
+    last_cure: dict = field(default_factory=dict)
     recorder: SequenceRecorder = field(init=False)
 
     def __post_init__(self) -> None:
@@ -50,11 +51,14 @@ class OpenSequence:
         if press.phase in (PressPhase.CURING, PressPhase.COOLING):
             press.transition(PressPhase.VENTING)
         finished = complete_cure(press.timer, self.latch, self.bus)
+        self.last_cure = finished
+        press.record_last_cure(finished)
         self.recorder.note(
             "timer_complete",
             "timer",
             mold_id=mold_id,
             verdict=finished["verdict"],
+            verdict_label=finished["verdict_label"],
             latch_set=finished["latch_set"],
         )
 
@@ -83,6 +87,7 @@ class OpenSequence:
             released=bool(entry and entry.released),
         )
 
+        press.timer.reset(mold_id)
         press.finalize_cycle()
         press.idle()
         return self.report(mold_id)
@@ -92,6 +97,17 @@ class OpenSequence:
             "mold_id": mold_id,
             "steps": self.recorder.names(),
             "violations": verify_order(self.recorder.names(), OPEN_ORDER),
+            "cure": {
+                "product_code": self.last_cure.get("product_code"),
+                "thickness_mm": self.last_cure.get("thickness_mm"),
+                "planned_s": self.last_cure.get("planned_s"),
+                "elapsed_s": self.last_cure.get("elapsed_s"),
+                "ratio": self.last_cure.get("ratio"),
+                "curve_generation": self.last_cure.get("curve_generation"),
+                "verdict": self.last_cure.get("verdict"),
+                "verdict_label": self.last_cure.get("verdict_label"),
+                "within_window": self.last_cure.get("within_window"),
+            },
             "latch": self.latch.snapshot(),
             "press_phase": self.press.phase.value,
         }

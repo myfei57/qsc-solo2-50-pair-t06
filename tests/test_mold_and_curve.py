@@ -70,6 +70,24 @@ def test_curve_book_uses_latest_generation_for_baseline():
         book.latest_for("nope")
 
 
+def test_curve_book_describe_marks_only_latest_generation():
+    book = CurveBook()
+    book.register("RB-215", 600.0, 1.0)
+    book.register("RB-215", 900.0, 2.0)
+    described = book.describe_history("RB-215")
+    assert [item["generation"] for item in described] == [1, 2]
+    assert [item["is_latest"] for item in described] == [False, True]
+    assert all(item["reference_thickness_mm"] == 6.0 for item in described)
+    assert book.describe()["RB-215"][1]["nominal_s"] == 900.0
+
+
+def test_thicker_product_always_cures_longer_than_thin_one():
+    curve = CurveBook().register("RB-215", 600.0, 1.0)
+    assert curve.cure_seconds(3.0) < 600.0 < curve.cure_seconds(12.0)
+    with pytest.raises(Exception):
+        curve.cure_seconds(0.0)
+
+
 def test_mold_summary_groups_active_and_retired():
     registry = MoldRegistry()
     registry.register("a", "RB-215", 4, 1.0)

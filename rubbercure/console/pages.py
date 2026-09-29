@@ -80,8 +80,9 @@ def _sections(page: str) -> str:
     return (
         "<section><h2>本页关注</h2>"
         f"<p style='font-size:13px;color:#d8b98c'>{focused}</p>"
-        "<button onclick=\"act('/api/cure', {mold_id: 'mold-01'})\">硫化顺序</button>"
-        "<button onclick=\"act('/api/open', {})\">开模顺序</button>"
+        "<button onclick=\"act('/api/cure', {mold_id: 'mold-01', thickness_mm: 3})\">薄件 3mm 硫化</button>"
+        "<button onclick=\"act('/api/cure', {mold_id: 'mold-01', thickness_mm: 12})\">厚件 12mm 硫化</button>"
+        "<button onclick=\"act('/api/open', {})\">开模取件（出欠硫/过硫判定）</button>"
         "<button onclick=\"act('/api/dispatch', {})\">机群调度</button>"
         "<button class='warn' onclick=\"act('/api/stop', {})\">停运顺序</button>"
         "<button onclick=\"act('/api/step', {dt: 1.0})\">推进周期</button>"

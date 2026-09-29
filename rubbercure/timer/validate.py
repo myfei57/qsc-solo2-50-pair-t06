@@ -8,6 +8,12 @@ from __future__ import annotations
 
 from ..config import TimerLimits
 
+VERDICT_LABELS: dict[str, str] = {
+    "short": "欠硫",
+    "ok": "合格",
+    "over": "过硫",
+}
+
 
 def validate_progress(elapsed_s: float, planned_s: float, limits: TimerLimits) -> dict:
     """按计划时长与工艺窗口判定硫化进度。"""
@@ -26,5 +32,6 @@ def validate_progress(elapsed_s: float, planned_s: float, limits: TimerLimits) -
         "planned_s": round(float(planned_s), 3),
         "ratio": round(ratio, 4),
         "verdict": verdict,
+        "verdict_label": VERDICT_LABELS[verdict],
         "within_window": verdict == "ok",
     }

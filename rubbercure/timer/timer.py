@@ -30,8 +30,10 @@ class CureTimer:
         self._mold_id: str | None = None
         self._product_code = ""
         self._generation = 0
+        self._thickness_mm = 0.0
         self._planned_s = 0.0
         self._elapsed_s = 0.0
+        self._verdict: dict | None = None
         self._samples: list[float] = []
         self._clock_now = 0.0
         self._lock = threading.RLock()
@@ -60,6 +62,23 @@ class CureTimer:
         with self._lock:
             return self._generation
 
+    @property
+    def product_code(self) -> str:
+        with self._lock:
+            return self._product_code
+
+    @property
+    def thickness_mm(self) -> float:
+        with self._lock:
+            return self._thickness_mm
+
+    @property
+    def verdict(self) -> dict | None:
+        """本模结束后的欠硫／合格／过硫判定；未结束或已复位为 None。"""
+
+        with self._lock:
+            return None if self._verdict is None else dict(self._verdict)
+
     def set_clock_now(self, moment: float) -> None:
         with self._lock:
             self._clock_now = float(moment)
@@ -74,8 +93,10 @@ class CureTimer:
         product_code: str,
         planned_s: float,
         generation: int,
+        *,
+        thickness_mm: float = 0.0,
     ) -> dict:
-        """进入计时相位并锁定计划时长与曲线代际。"""
+        """进入计时相位并锁定计划时长、制品厚度与曲线代际。"""
 
         if planned_s <= 0:
             raise ValueError("计划硫化时长必须为正")
@@ -84,12 +105,15 @@ class CureTimer:
             self._mold_id = mold_id
             self._product_code = product_code
             self._generation = int(generation)
+            self._thickness_mm = float(thickness_mm)
             self._planned_s = float(planned_s)
             self._elapsed_s = 0.0
+            self._verdict = None
             self._samples = []
         return {
             "mold_id": mold_id,
             "product_code": product_code,
+            "thickness_mm": round(self._thickness_mm, 3),
             "planned_s": round(planned_s, 3),
             "curve_generation": generation,
             "phase": self._state.phase.value,
@@ -143,13 +167,27 @@ class CureTimer:
             planned = self._planned_s
             elapsed = self._elapsed_s
             mold_id = self._mold_id
+            product_code = self._product_code
+            thickness = self._thickness_mm
             generation = self._generation
         return {
             "mold_id": mold_id,
+            "product_code": product_code,
+            "thickness_mm": round(thickness, 3),
             "elapsed_s": round(elapsed, 3),
             "planned_s": round(planned, 3),
             "curve_generation": generation,
         }
+
+    def attach_verdict(self, verdict: dict) -> None:
+        """把结束校验的欠硫／合格／过硫判定挂在本模计时上。
+
+        判定由 ``validate_progress`` 给出，计时单元只保存不重算；复位后清空。
+        有了它，取件上报和状态快照都能直接回答"这一模是欠硫还是过硫"。
+        """
+
+        with self._lock:
+            self._verdict = dict(verdict)
 
     def reset(self, mold_id: str) -> dict:
         """按模复位计时，回到空闲等待下一模。"""
@@ -162,8 +200,12 @@ class CureTimer:
             self._state.transition(TimerPhase.RESET)
             self._state.transition(TimerPhase.IDLE)
             self._mold_id = None
+            self._product_code = ""
+            self._generation = 0
+            self._thickness_mm = 0.0
             self._planned_s = 0.0
             self._elapsed_s = 0.0
+            self._verdict = None
             self._samples = []
         self._bus.publish(
             Event.of("timer", "timer", "cure_reset", subject=mold_id, severity="info")
@@ -176,8 +218,13 @@ class CureTimer:
         with self._lock:
             snapshot = self._state.snapshot()
             snapshot["mold_id"] = self._mold_id
+            snapshot["product_code"] = self._product_code
+            snapshot["curve_generation"] = self._generation
+            snapshot["thickness_mm"] = round(self._thickness_mm, 4)
             snapshot["planned_s"] = round(self._planned_s, 4)
             snapshot["elapsed_s"] = round(self._elapsed_s, 4)
+            if self._verdict is not None:
+                snapshot["verdict"] = dict(self._verdict)
         digest = self._store.write(STATE_KEY, snapshot)
         return digest
 
@@ -191,10 +238,16 @@ class CureTimer:
         with self._lock:
             mold_id = snapshot.get("mold_id")
             self._mold_id = str(mold_id) if mold_id else None
+            self._product_code = str(snapshot.get("product_code") or "")
+            self._generation = int(snapshot.get("curve_generation") or 0)
+            thickness = snapshot.get("thickness_mm")
+            self._thickness_mm = float(thickness) if isinstance(thickness, (int, float)) else 0.0
             planned = snapshot.get("planned_s")
             elapsed = snapshot.get("elapsed_s")
             self._planned_s = float(planned) if isinstance(planned, (int, float)) else 0.0
             self._elapsed_s = float(elapsed) if isinstance(elapsed, (int, float)) else 0.0
+            verdict = snapshot.get("verdict")
+            self._verdict = dict(verdict) if isinstance(verdict, dict) else None
         return True
 
     def snapshot(self) -> dict:
@@ -205,9 +258,11 @@ class CureTimer:
                 "mold_id": self._mold_id,
                 "product_code": self._product_code,
                 "curve_generation": self._generation,
+                "thickness_mm": round(self._thickness_mm, 3),
                 "planned_s": round(self._planned_s, 3),
                 "elapsed_s": round(self._elapsed_s, 3),
                 "remaining_s": self.estimate()["remaining_s"],
                 "progress": self.estimate()["progress"],
+                "verdict": None if self._verdict is None else dict(self._verdict),
                 "window": self.window_stats(),
             }

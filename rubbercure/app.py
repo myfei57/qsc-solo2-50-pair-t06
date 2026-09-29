@@ -456,6 +456,7 @@ class Platform:
             "molds": summarize_molds(self.registry),
             "sensor_maps": self.maps.snapshot(),
             "curves": self.curves.snapshot(),
+            "curves_latest": self.curves.describe(),
             "latch": self.latch.snapshot(),
             "fleet": summarize_fleet(self.fleet),
             "scheduler": self.scheduler.snapshot(),

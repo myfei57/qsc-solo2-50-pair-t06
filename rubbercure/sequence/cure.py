@@ -153,6 +153,7 @@ class CureSequence:
             self.bus,
             product_code=profile.product_code,
             generation=profile.curve_generation,
+            thickness_mm=profile.thickness_mm,
         )
         self.recorder.note(
             "timer_start",

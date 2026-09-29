@@ -26,6 +26,7 @@ def start_cure(
     *,
     product_code: str = "",
     generation: int = 0,
+    thickness_mm: float = 0.0,
 ) -> dict:
     """校验模温确认已落盘后启动硫化计时。"""
 
@@ -35,7 +36,13 @@ def start_cure(
             f"模温确认属于 {confirmation.mold_id}，与计时对象 {mold_id} 不一致",
             component="timer",
         )
-    started = timer.begin(mold_id, product_code, planned_s, generation)
+    started = timer.begin(
+        mold_id,
+        product_code,
+        planned_s,
+        generation,
+        thickness_mm=thickness_mm,
+    )
     bus.publish(
         Event.of(
             "timer",
@@ -44,6 +51,7 @@ def start_cure(
             subject=mold_id,
             severity="notice",
             planned_s=round(planned_s, 3),
+            thickness_mm=round(float(thickness_mm), 3),
             curve_generation=generation,
             temp_confirmation_digest=confirmation.digest[:12],
         )

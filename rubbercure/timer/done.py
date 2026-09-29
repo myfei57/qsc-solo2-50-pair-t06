@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from ..eventbus import Event, EventBus
 from .latch import CureLatch
-from .validate import validate_progress
+from .validate import VERDICT_LABELS, validate_progress
 
 if TYPE_CHECKING:  # pragma: no cover - 仅用于类型标注，避免环
     from .timer import CureTimer
@@ -22,13 +22,21 @@ def complete_cure(timer: "CureTimer", latch: CureLatch, bus: EventBus) -> dict:
 
     finished = timer.finish()
     verdict = validate_progress(finished["elapsed_s"], finished["planned_s"], timer.limits)
+    timer.attach_verdict(verdict)
     mold_id = timer.mold_id or "unknown"
     severity = "notice" if verdict["within_window"] else "warning"
     entry = latch.set(mold_id, timer.clock_now())
     result = {
         "mold_id": mold_id,
+        "product_code": finished["product_code"],
+        "thickness_mm": finished["thickness_mm"],
+        "planned_s": verdict["planned_s"],
         "elapsed_s": verdict["elapsed_s"],
+        "ratio": verdict["ratio"],
+        "curve_generation": finished["curve_generation"],
         "verdict": verdict["verdict"],
+        "verdict_label": VERDICT_LABELS[verdict["verdict"]],
+        "within_window": verdict["within_window"],
         "latch_generation": entry.generation,
         "latch_set": latch.is_set(mold_id),
     }
