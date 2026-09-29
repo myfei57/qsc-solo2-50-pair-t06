@@ -59,6 +59,12 @@ class BatchScheduler:
         product_code: str,
         completed_at: float,
         curve_generation: int,
+        *,
+        thickness_mm: float = 0.0,
+        planned_s: float = 0.0,
+        elapsed_s: float = 0.0,
+        verdict: str = "",
+        verdict_label: str = "",
     ) -> CompletionReport:
         """登记一条完成上报（统一分配上报序号）。"""
 
@@ -73,6 +79,11 @@ class BatchScheduler:
                 curve_generation,
                 sequence,
                 self.bus,
+                thickness_mm=thickness_mm,
+                planned_s=planned_s,
+                elapsed_s=elapsed_s,
+                verdict=verdict,
+                verdict_label=verdict_label,
             )
             self._reports.append(report)
             if len(self._reports) > _REPORT_MEMORY:

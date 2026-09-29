@@ -13,8 +13,11 @@ from dataclasses import dataclass
 
 from ..errors import CureError
 from ..mold.generation import GenerationCounter
+from ..store.jsonfile import JsonStore
 
 REFERENCE_THICKNESS_MM = 6.0
+
+CURVE_STATE_KEY = "cure_curves"
 
 
 @dataclass(frozen=True)
@@ -47,15 +50,25 @@ class CureCurve:
 
 
 class CurveBook:
-    """按制品型号保存全部代际曲线，读取时取最新代际。"""
+    """按制品型号保存全部代际曲线，读取时取最新代际。
 
-    def __init__(self, counter: GenerationCounter | None = None) -> None:
+    给出 :class:`JsonStore` 时曲线台账落盘：登记新一代曲线立即原子写入，
+    进程重启后按落盘内容恢复。这样曲线改版不会被重启"抹掉"，老代际曲线
+    也不会和新代际混在一起——每代记录都挂着自己的代际号与登记时刻。
+    """
+
+    def __init__(
+        self,
+        counter: GenerationCounter | None = None,
+        store: JsonStore | None = None,
+    ) -> None:
         self._counter = counter or GenerationCounter()
+        self._store = store
         self._by_product: dict[str, list[CureCurve]] = {}
         self._lock = threading.RLock()
 
     def register(self, product_code: str, nominal_s: float, registered_at: float) -> CureCurve:
-        """登记一份新代际曲线。"""
+        """登记一份新代际曲线并落盘。"""
 
         if not product_code:
             raise CureError("制品型号不能为空", component="timer")
@@ -68,6 +81,7 @@ class CurveBook:
                 registered_at=float(registered_at),
             )
             self._by_product.setdefault(product_code, []).append(curve)
+            self._persist_locked()
         return curve
 
     def latest_for(self, product_code: str) -> CureCurve:
@@ -89,9 +103,59 @@ class CurveBook:
             history = list(self._by_product.get(product_code, ()))
         return sorted(history, key=lambda item: item.generation)
 
+    def products(self) -> list[str]:
+        """返回已登记曲线的全部制品型号。"""
+
+        with self._lock:
+            return sorted(self._by_product)
+
     def snapshot(self) -> dict:
         with self._lock:
             return {
                 product_code: [curve.as_dict() for curve in history]
                 for product_code, history in sorted(self._by_product.items())
             }
+
+    def _persist_locked(self) -> str:
+        if self._store is None:
+            return ""
+        payload = {
+            "products": {
+                product_code: [curve.as_dict() for curve in history]
+                for product_code, history in self._by_product.items()
+            }
+        }
+        self._store.write(CURVE_STATE_KEY, payload)
+        return self._store.digest(CURVE_STATE_KEY)
+
+    def restore(self) -> bool:
+        """从磁盘恢复曲线台账，代际计数器接着最大代际继续分配。"""
+
+        if self._store is None:
+            return False
+        snapshot = self._store.read(CURVE_STATE_KEY)
+        if not snapshot:
+            return False
+        products = snapshot.get("products")
+        if not isinstance(products, dict):
+            raise CureError("曲线台账快照缺少 products 段落", component="timer")
+        with self._lock:
+            restored: dict[str, list[CureCurve]] = {}
+            max_generation = 0
+            for product_code, raw_history in products.items():
+                if not isinstance(raw_history, list):
+                    raise CureError(f"曲线台账中 {product_code} 的历史必须是列表", component="timer")
+                curves: list[CureCurve] = []
+                for item in raw_history:
+                    curve = CureCurve(
+                        product_code=str(product_code),
+                        generation=int(item["generation"]),
+                        nominal_s=float(item["nominal_s"]),
+                        registered_at=float(item["registered_at"]),
+                    )
+                    curves.append(curve)
+                    max_generation = max(max_generation, curve.generation)
+                restored[str(product_code)] = sorted(curves, key=lambda item: item.generation)
+            self._by_product = restored
+            self._counter = GenerationCounter(start=max_generation)
+        return True

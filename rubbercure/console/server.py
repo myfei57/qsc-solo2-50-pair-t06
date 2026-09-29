@@ -112,6 +112,10 @@ class ConsoleRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(self.api.remap(self._read_json()))
             elif parsed.path == "/api/retire":
                 self._send_json(self.api.retire(self._read_json()))
+            elif parsed.path == "/api/curve":
+                self._send_json(self.api.register_curve(self._read_json()))
+            elif parsed.path == "/api/quote":
+                self._send_json(self.api.quote(self._read_json()))
             else:
                 self._send_json({"error": "not-found", "path": parsed.path}, status=404)
         except (ValueError, KeyError) as error:

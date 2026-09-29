@@ -22,6 +22,11 @@ class CompletionReport:
     completed_at: float
     curve_generation: int
     sequence: int
+    thickness_mm: float = 0.0
+    planned_s: float = 0.0
+    elapsed_s: float = 0.0
+    verdict: str = ""
+    verdict_label: str = ""
 
     def as_dict(self) -> dict:
         return {
@@ -31,6 +36,11 @@ class CompletionReport:
             "completed_at": round(self.completed_at, 3),
             "curve_generation": self.curve_generation,
             "sequence": self.sequence,
+            "thickness_mm": round(self.thickness_mm, 3),
+            "planned_s": round(self.planned_s, 3),
+            "elapsed_s": round(self.elapsed_s, 3),
+            "verdict": self.verdict,
+            "verdict_label": self.verdict_label,
         }
 
 
@@ -42,6 +52,12 @@ def report_completion(
     curve_generation: int,
     sequence: int,
     bus: EventBus,
+    *,
+    thickness_mm: float = 0.0,
+    planned_s: float = 0.0,
+    elapsed_s: float = 0.0,
+    verdict: str = "",
+    verdict_label: str = "",
 ) -> CompletionReport:
     """组装一条完成上报并发布事件。"""
 
@@ -52,6 +68,11 @@ def report_completion(
         completed_at=float(completed_at),
         curve_generation=int(curve_generation),
         sequence=int(sequence),
+        thickness_mm=float(thickness_mm),
+        planned_s=float(planned_s),
+        elapsed_s=float(elapsed_s),
+        verdict=verdict,
+        verdict_label=verdict_label,
     )
     bus.publish(
         Event.of(

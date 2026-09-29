@@ -67,6 +67,17 @@ class SteamUnit:
     def transition_state(self, target: SteamPhase) -> SteamPhase:
         return self._state.transition(target)
 
+    def maintenance_reset(self) -> None:
+        """检修复位：相位、母管压力、阀门与令牌全部回到初始状态。"""
+
+        with self._lock:
+            self._state = SteamStateMachine()
+            self.header = SteamHeader(bus_pressure_kpa=0.0)
+            self.valve.close()
+            self.trap.close()
+            self._purge_token = None
+            self._vent_token = None
+
     def opening_for_target(self, target_kpa: float) -> float:
         """把压力目标折算成阀门开度。"""
 

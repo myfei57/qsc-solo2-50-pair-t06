@@ -83,17 +83,25 @@ class Platform:
 
         self.registry = MoldRegistry()
         self.maps = SensorMapBook()
-        self.curves = CurveBook()
+        self.curves = CurveBook(store=self.store)
         self.latch = CureLatch()
         self.fleet = PressFleet.from_config(
             self.clock, self.bus, self.store.root, self.config
         )
         self.scheduler = BatchScheduler(self.bus, self.config.batch, self.curves)
-        self._seed_reference_curve()
+        if not self.curves.restore():
+            self._seed_reference_curve()
 
         self._cycles = 0
         self._lock = threading.RLock()
         self._register_namespaces()
+        self._restore_presses()
+
+    def _restore_presses(self) -> None:
+        """启动时恢复各机蒸汽、模温确认与计时落盘状态。"""
+
+        for unit in self.fleet.all():
+            unit.restore()
 
     def _seed_reference_curve(self) -> None:
         """登记一份出厂参考曲线，供默认制品型号直接投产。"""
@@ -188,6 +196,41 @@ class Platform:
             )
         )
         return record.as_dict()
+
+    def register_curve_revision(self, product_code: str, nominal_s: float) -> dict:
+        """为制品型号登记新一代硫化曲线（配方迭代／客户改版后调用）。
+
+        登记立即落盘，之后所有该型号的模次都按新一代曲线和制品厚度折算
+        计划时长；老代际仍保留在台账里，历史记录挂着自己的代际号，不会
+        和新曲线混淆。
+        """
+
+        curve = self.curves.register(product_code, nominal_s, self.clock.now())
+        self.bus.publish(
+            Event.of(
+                "timer",
+                "timer",
+                "curve_revision_registered",
+                subject=product_code,
+                severity="notice",
+                product_code=product_code,
+                generation=curve.generation,
+                nominal_s=round(curve.nominal_s, 3),
+            )
+        )
+        return curve.as_dict()
+
+    def quote_cure_seconds(self, product_code: str, thickness_mm: float) -> dict:
+        """按最新代际曲线与制品厚度试算这一模该跑多久，不改变任何状态。"""
+
+        curve = self.curves.latest_for(product_code)
+        return {
+            "product_code": product_code,
+            "thickness_mm": round(float(thickness_mm), 3),
+            "curve_generation": curve.generation,
+            "nominal_s": round(curve.nominal_s, 3),
+            "planned_s": round(curve.cure_seconds(thickness_mm), 3),
+        }
 
     def enqueue_mold(self, mold_id: str, thickness_mm: float | None = None, priority: int = 50) -> dict:
         """把一台已登记模具排进调度队列。"""
@@ -433,13 +476,18 @@ class Platform:
         return record.as_dict()
 
     def reset_state(self) -> dict:
-        """清掉所有硫化机的落盘状态（检修后重新标定用）。"""
+        """清掉所有硫化机的落盘状态并复位内存（检修后重新标定用）。
+
+        曲线台账是工艺基线、不属于半程工况，不在此清除；曲线改版走
+        :meth:`register_curve_revision` 单独留代际。
+        """
 
         removed: list[str] = []
         for unit in self.fleet.all():
             removed.append(unit.store.root if unit.store.remove("steam_state") else "")
             unit.store.remove("cure_timer")
             unit.store.remove("temp_confirmation")
+            unit.maintenance_reset()
         self.latch.release_all()
         return {"storage_root": self.store.root, "cleared": [item for item in removed if item]}
 
@@ -495,6 +543,8 @@ class Platform:
                 "/api/enqueue",
                 "/api/remap",
                 "/api/retire",
+                "/api/curve",
+                "/api/quote",
             ],
         }
 

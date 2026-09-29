@@ -117,6 +117,12 @@ class TempPersister:
         with self._lock:
             return self._latest
 
+    def maintenance_reset(self) -> None:
+        """检修复位：清掉内存里的模温确认（落盘文档由调用方删除）。"""
+
+        with self._lock:
+            self._latest = None
+
     def stored(self) -> dict | None:
         """直接读回落盘内容，用于与内存视图对照。"""
 

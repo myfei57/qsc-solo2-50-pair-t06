@@ -27,8 +27,16 @@ def complete_cure(timer: "CureTimer", latch: CureLatch, bus: EventBus) -> dict:
     entry = latch.set(mold_id, timer.clock_now())
     result = {
         "mold_id": mold_id,
+        "product_code": finished["product_code"],
+        "thickness_mm": finished["thickness_mm"],
         "elapsed_s": verdict["elapsed_s"],
+        "planned_s": verdict["planned_s"],
+        "deviation_s": verdict["deviation_s"],
+        "ratio": verdict["ratio"],
         "verdict": verdict["verdict"],
+        "verdict_label": verdict["verdict_label"],
+        "within_window": verdict["within_window"],
+        "curve_generation": finished["curve_generation"],
         "latch_generation": entry.generation,
         "latch_set": latch.is_set(mold_id),
     }
@@ -42,4 +50,6 @@ def complete_cure(timer: "CureTimer", latch: CureLatch, bus: EventBus) -> dict:
             **result,
         )
     )
+    timer.store_result(result)
+    timer.persist_state()
     return result

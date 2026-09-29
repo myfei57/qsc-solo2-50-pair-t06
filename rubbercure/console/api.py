@@ -159,6 +159,38 @@ class ConsoleAPI:
         except RubberCureError as error:
             return {"ok": False, "error": self.platform.note_error(error)}
 
+    def register_curve(self, payload: dict) -> dict:
+        """登记新一代硫化曲线（曲线改版）。"""
+
+        product_code = str(payload.get("product_code", "")).strip()
+        try:
+            nominal_s = float(payload["nominal_s"])
+        except (KeyError, TypeError, ValueError):
+            return {"ok": False, "error": {"type": "ValueError", "message": "nominal_s 必须是正数秒"}}
+        try:
+            return {
+                "ok": True,
+                "curve": self.platform.register_curve_revision(product_code, nominal_s),
+            }
+        except RubberCureError as error:
+            return {"ok": False, "error": self.platform.note_error(error)}
+
+    def quote(self, payload: dict) -> dict:
+        """按制品厚度与最新曲线试算这一模的硫化时长。"""
+
+        product_code = str(payload.get("product_code", "")).strip()
+        try:
+            thickness_mm = float(payload["thickness_mm"])
+        except (KeyError, TypeError, ValueError):
+            return {"ok": False, "error": {"type": "ValueError", "message": "thickness_mm 必须是正数毫米"}}
+        try:
+            return {
+                "ok": True,
+                "quote": self.platform.quote_cure_seconds(product_code, thickness_mm),
+            }
+        except RubberCureError as error:
+            return {"ok": False, "error": self.platform.note_error(error)}
+
     def remap(self, payload: dict) -> dict:
         """重新登记传感器映射。"""
 

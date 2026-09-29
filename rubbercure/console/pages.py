@@ -51,6 +51,20 @@ async function act(path, payload) {
   document.getElementById('out-action').textContent = JSON.stringify(result, null, 2);
   refresh();
 }
+function cureWithThickness() {
+  const t = parseFloat(document.getElementById('in-thickness').value || '6');
+  act('/api/cure', {mold_id: 'mold-01', thickness_mm: t});
+}
+function quoteCure() {
+  const code = document.getElementById('in-code').value || 'RB-215';
+  const t = parseFloat(document.getElementById('in-thickness').value || '6');
+  act('/api/quote', {product_code: code, thickness_mm: t});
+}
+function registerCurve() {
+  const code = document.getElementById('in-code').value || 'RB-215';
+  const nominal = parseFloat(document.getElementById('in-nominal').value || '600');
+  act('/api/curve', {product_code: code, nominal_s: nominal});
+}
 window.addEventListener('DOMContentLoaded', () => {
   refresh();
   setInterval(refresh, 5000);
@@ -77,14 +91,28 @@ def _sections(page: str) -> str:
         "timer": "硫化进度、曲线代际与完成闩锁",
         "alarms": "告警条目、审计摘要与落盘日志",
     }[page]
+    if page == "timer":
+        controls = (
+            "<label style='font-size:13px'>制品型号 <input id='in-code' value='RB-215' style='width:90px'></label> "
+            "<label style='font-size:13px'>厚度mm <input id='in-thickness' type='number' value='6' step='0.1' style='width:70px'></label> "
+            "<label style='font-size:13px'>标称秒数 <input id='in-nominal' type='number' value='600' style='width:80px'></label><br><br>"
+            "<button onclick=\"cureWithThickness()\">按厚度硫化</button>"
+            "<button onclick=\"quoteCure()\">试算这模时长</button>"
+            "<button onclick=\"registerCurve()\">登记曲线改版</button>"
+            "<button onclick=\"act('/api/open', {})\">开模看欠硫/过硫</button>"
+        )
+    else:
+        controls = (
+            "<button onclick=\"act('/api/cure', {mold_id: 'mold-01'})\">硫化顺序</button>"
+            "<button onclick=\"act('/api/open', {})\">开模顺序</button>"
+            "<button onclick=\"act('/api/dispatch', {})\">机群调度</button>"
+            "<button class='warn' onclick=\"act('/api/stop', {})\">停运顺序</button>"
+        )
+    controls += "<button onclick=\"act('/api/step', {dt: 1.0})\">推进周期</button>"
     return (
         "<section><h2>本页关注</h2>"
         f"<p style='font-size:13px;color:#d8b98c'>{focused}</p>"
-        "<button onclick=\"act('/api/cure', {mold_id: 'mold-01'})\">硫化顺序</button>"
-        "<button onclick=\"act('/api/open', {})\">开模顺序</button>"
-        "<button onclick=\"act('/api/dispatch', {})\">机群调度</button>"
-        "<button class='warn' onclick=\"act('/api/stop', {})\">停运顺序</button>"
-        "<button onclick=\"act('/api/step', {dt: 1.0})\">推进周期</button>"
+        f"{controls}"
         "<pre id='out-action'>等待操作</pre></section>"
         "<section><h2>实时状态</h2><pre id='out-status'>加载中</pre></section>"
         "<section><h2>趋势窗口（10 分钟）</h2><pre id='out-trend'>加载中</pre></section>"

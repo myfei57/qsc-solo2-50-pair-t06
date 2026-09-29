@@ -69,6 +69,7 @@ class CureSequence:
     curves: CurveBook
     press: CuringPress
     last_confirmation: dict = field(default_factory=dict)
+    last_profile: dict = field(default_factory=dict)
     recorder: SequenceRecorder = field(init=False)
 
     def __post_init__(self) -> None:
@@ -153,16 +154,19 @@ class CureSequence:
             self.bus,
             product_code=profile.product_code,
             generation=profile.curve_generation,
+            thickness_mm=profile.thickness_mm,
         )
         self.recorder.note(
             "timer_start",
             "timer",
             mold_id=plan.mold_id,
+            thickness_mm=started["thickness_mm"],
             planned_s=started["planned_s"],
             curve_generation=started["curve_generation"],
             confirmed=press.temp_loop.is_confirmed(),
         )
         press.transition(PressPhase.CURING)
+        self.last_profile = profile.as_dict()
         return self.report(plan, warmup)
 
     def report(self, plan: CureRunPlan, warmup: dict) -> dict:
@@ -170,6 +174,7 @@ class CureSequence:
 
         return {
             "mold_id": plan.mold_id,
+            "profile": self.last_profile,
             "steps": self.recorder.names(),
             "violations": verify_order(self.recorder.names(), CURE_ORDER),
             "trace": self.recorder.as_list(),

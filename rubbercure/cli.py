@@ -7,6 +7,8 @@
             调度 → 停运顺序），用于交付前的真实运行检查；
 ``status``  打印当前状态快照；
 ``config``  打印生效配置；
+``curve``   登记新一代硫化曲线（改版）或查看曲线代际台账；
+``quote``   按制品厚度与最新曲线试算这一模的硫化时长；
 ``reset``   清掉各台硫化机的落盘状态。
 """
 
@@ -135,6 +137,26 @@ def _cmd_reset(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_curve(args: argparse.Namespace) -> int:
+    platform = _build(args)
+    if args.nominal_s is not None:
+        payload = platform.register_curve_revision(args.product_code, args.nominal_s)
+        _dump({"registered": payload})
+        return 0
+    if args.history:
+        curves = [curve.as_dict() for curve in platform.curves.history(args.product_code)]
+        _dump({"product_code": args.product_code, "history": curves})
+        return 0
+    _dump(platform.curves.snapshot())
+    return 0
+
+
+def _cmd_quote(args: argparse.Namespace) -> int:
+    platform = _build(args)
+    _dump(platform.quote_cure_seconds(args.product_code, args.thickness_mm))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """构造命令行解析器。"""
 
@@ -164,6 +186,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     config = sub.add_parser("config", help="打印生效配置")
     config.set_defaults(func=_cmd_config)
+
+    curve = sub.add_parser("curve", help="登记曲线改版或查看曲线代际台账")
+    curve.add_argument("--product-code", default=None, help="制品型号，缺省打印全部曲线")
+    curve.add_argument("--nominal-s", type=float, default=None, help="登记新一代曲线的标称硫化秒数")
+    curve.add_argument("--history", action="store_true", help="只看指定型号的代际历史")
+    curve.set_defaults(func=_cmd_curve)
+
+    quote = sub.add_parser("quote", help="按厚度与最新曲线试算硫化时长")
+    quote.add_argument("--product-code", required=True, help="制品型号")
+    quote.add_argument("--thickness-mm", type=float, required=True, help="制品厚度（毫米）")
+    quote.set_defaults(func=_cmd_quote)
 
     reset = sub.add_parser("reset", help="清掉各台硫化机的落盘状态")
     reset.set_defaults(func=_cmd_reset)

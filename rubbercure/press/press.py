@@ -23,11 +23,15 @@ from ..temp.controller import TempController
 from ..temp.persist import TempPersister
 from ..temp.regulation import TempLoop
 from ..timer.timer import CureTimer
+from ..timer.state import TimerPhase
 from ..timer.cycle import advance_cure
 from .transitions import PressPhase, PressStateMachine
 
 if TYPE_CHECKING:  # pragma: no cover - 仅用于类型标注
     from ..temp.read import MoldTempReading
+
+
+PRESS_STATE_KEY = "press_state"
 
 
 class CuringPress:
@@ -123,6 +127,8 @@ class CuringPress:
                 "cooling": cooling,
                 "cure": self.timer.estimate(),
             }
+            if self.timer.phase in (TimerPhase.CURING, TimerPhase.COMPLETE):
+                self.persist_state()
             return self._last_step
 
     def finalize_cycle(self) -> dict:
@@ -142,25 +148,74 @@ class CuringPress:
         with self._lock:
             self.transition(PressPhase.IDLE)
             self._mold_id = None
+            self.persist_state()
         return {"press_id": self.press_id, "phase": self._state.phase.value}
 
-    def persist_state(self) -> dict:
-        """把蒸汽、模温确认与计时状态一起落盘。"""
+    def maintenance_reset(self) -> None:
+        """检修复位：整机回路与在机模具全部回到初始状态。"""
 
+        with self._lock:
+            self.store.remove(PRESS_STATE_KEY)
+            self._state = PressStateMachine()
+            self._mold_id = None
+            self._cycles = 0
+            self._last_step = {}
+            self.steam.maintenance_reset()
+            self.temp_persister.maintenance_reset()
+            self.timer.maintenance_reset()
+
+    def persist_state(self) -> dict:
+        """把蒸汽、模温确认、计时与在机模具一起落盘。"""
+
+        with self._lock:
+            self.store.write(
+                PRESS_STATE_KEY,
+                {"mold_id": self._mold_id, "phase": self._state.phase.value, "cycles": self._cycles},
+            )
+            steam_digest = self.steam.persist_state()
+            timer_digest = self.timer.persist_state()
         return {
             "press": self.press_id,
-            "steam": self.steam.persist_state(),
-            "timer": self.timer.persist_state(),
+            "mold_id": self.mold_id,
+            "phase": self._state.phase.value,
+            "cycles": self._cycles,
+            "steam": steam_digest,
+            "timer": timer_digest,
         }
 
     def restore(self) -> dict:
-        """从磁盘恢复蒸汽与计时状态。"""
+        """从磁盘恢复在机模具、蒸汽、计时与模温确认。"""
 
-        return {
+        result = {
             "steam": self.steam.restore(),
             "timer": self.timer.restore(),
             "temp": self.temp_persister.restore(),
         }
+        snapshot = self.store.read(PRESS_STATE_KEY)
+        if snapshot:
+            mold_id = snapshot.get("mold_id")
+            self._mold_id = str(mold_id) if mold_id else None
+            self._cycles = int(snapshot.get("cycles") or 0)
+            phase = snapshot.get("phase")
+            if isinstance(phase, str):
+                try:
+                    self._state.restore({"phase": phase})
+                except Exception:
+                    self._state = PressStateMachine()
+        # 计时器完成归位空闲后，机级相位也回到待机，保证下一模可投产。
+        if self.timer.phase is TimerPhase.IDLE and self._state.phase in (
+            PressPhase.CURING,
+            PressPhase.COOLING,
+            PressPhase.VENTING,
+            PressPhase.OPENING,
+            PressPhase.DONE,
+        ):
+            self._state = PressStateMachine()
+        if self.timer.phase is TimerPhase.CURING and self._state.phase is PressPhase.IDLE:
+            self._state.transition(PressPhase.CURING)
+        if self.timer.phase is TimerPhase.CURING and self._mold_id and not self.lift.is_closed():
+            self.lift.restore_closed(self._mold_id)
+        return result
 
     def snapshot(self) -> dict:
         with self._lock:

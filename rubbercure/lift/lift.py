@@ -96,6 +96,14 @@ class LiftUnit:
         )
         return opening
 
+    def restore_closed(self, mold_id: str) -> None:
+        """崩溃恢复：按落盘事实直接置为合模到位，不走正常迁移。"""
+
+        with self._lock:
+            self._state.restore({"phase": LiftPhase.CLOSED.value})
+            self._position = ClampPosition(CLOSED_PCT)
+            self._carried_mold = mold_id
+
     def open_clamp(self, mold_id: str) -> float:
         """开模到取件位。"""
 

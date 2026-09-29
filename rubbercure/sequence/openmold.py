@@ -35,6 +35,7 @@ class OpenSequence:
     bus: EventBus
     latch: CureLatch
     press: CuringPress
+    last_verdict: dict = field(default_factory=dict)
     recorder: SequenceRecorder = field(init=False)
 
     def __post_init__(self) -> None:
@@ -50,11 +51,15 @@ class OpenSequence:
         if press.phase in (PressPhase.CURING, PressPhase.COOLING):
             press.transition(PressPhase.VENTING)
         finished = complete_cure(press.timer, self.latch, self.bus)
+        self.last_verdict = finished
         self.recorder.note(
             "timer_complete",
             "timer",
             mold_id=mold_id,
             verdict=finished["verdict"],
+            verdict_label=finished["verdict_label"],
+            elapsed_s=finished["elapsed_s"],
+            planned_s=finished["planned_s"],
             latch_set=finished["latch_set"],
         )
 
@@ -90,6 +95,7 @@ class OpenSequence:
     def report(self, mold_id: str) -> dict:
         return {
             "mold_id": mold_id,
+            "verdict": self.last_verdict,
             "steps": self.recorder.names(),
             "violations": verify_order(self.recorder.names(), OPEN_ORDER),
             "latch": self.latch.snapshot(),

@@ -30,9 +30,11 @@ class CureTimer:
         self._mold_id: str | None = None
         self._product_code = ""
         self._generation = 0
+        self._thickness_mm = 0.0
         self._planned_s = 0.0
         self._elapsed_s = 0.0
         self._samples: list[float] = []
+        self._last_result: dict = {}
         self._clock_now = 0.0
         self._lock = threading.RLock()
 
@@ -44,6 +46,16 @@ class CureTimer:
     def mold_id(self) -> str | None:
         with self._lock:
             return self._mold_id
+
+    @property
+    def product_code(self) -> str:
+        with self._lock:
+            return self._product_code
+
+    @property
+    def thickness_mm(self) -> float:
+        with self._lock:
+            return self._thickness_mm
 
     @property
     def planned_s(self) -> float:
@@ -74,8 +86,9 @@ class CureTimer:
         product_code: str,
         planned_s: float,
         generation: int,
+        thickness_mm: float = 0.0,
     ) -> dict:
-        """进入计时相位并锁定计划时长与曲线代际。"""
+        """进入计时相位并锁定计划时长、厚度与曲线代际。"""
 
         if planned_s <= 0:
             raise ValueError("计划硫化时长必须为正")
@@ -84,12 +97,14 @@ class CureTimer:
             self._mold_id = mold_id
             self._product_code = product_code
             self._generation = int(generation)
+            self._thickness_mm = float(thickness_mm)
             self._planned_s = float(planned_s)
             self._elapsed_s = 0.0
             self._samples = []
         return {
             "mold_id": mold_id,
             "product_code": product_code,
+            "thickness_mm": round(float(thickness_mm), 3),
             "planned_s": round(planned_s, 3),
             "curve_generation": generation,
             "phase": self._state.phase.value,
@@ -144,12 +159,31 @@ class CureTimer:
             elapsed = self._elapsed_s
             mold_id = self._mold_id
             generation = self._generation
-        return {
+            product_code = self._product_code
+            thickness = self._thickness_mm
+        result = {
             "mold_id": mold_id,
+            "product_code": product_code,
+            "thickness_mm": round(thickness, 3),
             "elapsed_s": round(elapsed, 3),
             "planned_s": round(planned, 3),
             "curve_generation": generation,
         }
+        with self._lock:
+            self._last_result = dict(result)
+        return result
+
+    def last_result(self) -> dict:
+        """返回最近一模的完成快照，复位之后仍可读。"""
+
+        with self._lock:
+            return dict(self._last_result)
+
+    def store_result(self, result: dict) -> None:
+        """把带判定结论的完成结果存档，供调度与控制台事后读取。"""
+
+        with self._lock:
+            self._last_result = dict(result)
 
     def reset(self, mold_id: str) -> dict:
         """按模复位计时，回到空闲等待下一模。"""
@@ -162,6 +196,9 @@ class CureTimer:
             self._state.transition(TimerPhase.RESET)
             self._state.transition(TimerPhase.IDLE)
             self._mold_id = None
+            self._product_code = ""
+            self._generation = 0
+            self._thickness_mm = 0.0
             self._planned_s = 0.0
             self._elapsed_s = 0.0
             self._samples = []
@@ -170,14 +207,32 @@ class CureTimer:
         )
         return {"mold_id": mold_id, "phase": self._state.phase.value}
 
+    def maintenance_reset(self) -> None:
+        """检修复位：清空在制模次、判定存档并回到空闲，不发事件。"""
+
+        with self._lock:
+            self._state = TimerStateMachine()
+            self._mold_id = None
+            self._product_code = ""
+            self._generation = 0
+            self._thickness_mm = 0.0
+            self._planned_s = 0.0
+            self._elapsed_s = 0.0
+            self._samples = []
+            self._last_result = {}
+
     def persist_state(self) -> str:
         """把计时相位与进度落盘，返回内容摘要。"""
 
         with self._lock:
             snapshot = self._state.snapshot()
             snapshot["mold_id"] = self._mold_id
+            snapshot["product_code"] = self._product_code
+            snapshot["curve_generation"] = self._generation
+            snapshot["thickness_mm"] = round(self._thickness_mm, 4)
             snapshot["planned_s"] = round(self._planned_s, 4)
             snapshot["elapsed_s"] = round(self._elapsed_s, 4)
+            snapshot["last_result"] = self._last_result
         digest = self._store.write(STATE_KEY, snapshot)
         return digest
 
@@ -188,13 +243,24 @@ class CureTimer:
         if not snapshot:
             return False
         self._state.restore(snapshot)
+        # 已经走完开模（或正在复位）的模次，重启后归位到空闲，避免下一模被
+        # "complete/reset -> curing" 挡住；最后一模的判定存档仍然保留。
+        if self._state.phase in (TimerPhase.COMPLETE, TimerPhase.RESET):
+            self._state = TimerStateMachine()
         with self._lock:
             mold_id = snapshot.get("mold_id")
             self._mold_id = str(mold_id) if mold_id else None
+            self._product_code = str(snapshot.get("product_code") or "")
+            generation = snapshot.get("curve_generation")
+            self._generation = int(generation) if isinstance(generation, (int, float)) else 0
+            thickness = snapshot.get("thickness_mm")
+            self._thickness_mm = float(thickness) if isinstance(thickness, (int, float)) else 0.0
             planned = snapshot.get("planned_s")
             elapsed = snapshot.get("elapsed_s")
             self._planned_s = float(planned) if isinstance(planned, (int, float)) else 0.0
             self._elapsed_s = float(elapsed) if isinstance(elapsed, (int, float)) else 0.0
+            last = snapshot.get("last_result")
+            self._last_result = dict(last) if isinstance(last, dict) else {}
         return True
 
     def snapshot(self) -> dict:
@@ -205,9 +271,11 @@ class CureTimer:
                 "mold_id": self._mold_id,
                 "product_code": self._product_code,
                 "curve_generation": self._generation,
+                "thickness_mm": round(self._thickness_mm, 3),
                 "planned_s": round(self._planned_s, 3),
                 "elapsed_s": round(self._elapsed_s, 3),
                 "remaining_s": self.estimate()["remaining_s"],
                 "progress": self.estimate()["progress"],
                 "window": self.window_stats(),
+                "last_result": self._last_result,
             }
